@@ -13,11 +13,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.clubpath.ui.theme.ClubPathTheme
 import com.example.clubpath.utils.CoCoFormat
+import com.example.clubpath.utils.Human36M
 import com.example.clubpath.utils.SwingKeypointModel
 import com.example.clubpath.utils.readJSONFromAssets
 import kotlinx.serialization.descriptors.PrimitiveKind
 import org.nd4j.linalg.api.buffer.DataType
 import org.nd4j.linalg.api.ndarray.INDArray
+import org.nd4j.linalg.api.ops.impl.indexaccum.IMax
+import org.nd4j.linalg.api.ops.impl.indexaccum.IMin
 import org.nd4j.linalg.factory.Nd4j
 import org.nd4j.linalg.indexing.INDArrayIndex
 import org.nd4j.linalg.indexing.NDArrayIndex
@@ -40,7 +43,12 @@ class MainActivity : ComponentActivity() {
 
         // ============= Predict 3D and PList =============== //
         val (raw2dH36M, processed2DH36M) = convertCoCoToHuman36M(kptArray, totalFrame, frameWidth = frameWidth, frameHeight = frameHeight)
-
+        var isSideView: Boolean = false
+        var isLefty: Boolean = false
+        raw2dH36M?.let {
+            isSideView = isSideViewCheck(it, 10)
+            isLefty = isLeftyCheck(it, isSideView, 10)
+        }
         setContent {
             ClubPathTheme {
                 // A surface container using the 'background' color from the theme
@@ -54,6 +62,38 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+private fun isSideViewCheck(keypoint: INDArray, considerFramed: Int = 10): Boolean {
+    val xHead = keypoint.getDouble(considerFramed, Human36M().head, 0)
+    val xRightShoulder = keypoint.getDouble(considerFramed, Human36M().rightShoulder, 0)
+    val xLeftShoulder = keypoint.getDouble(considerFramed, Human36M().leftShoulder, 0)
+
+    if (xRightShoulder < xHead &&  xHead < xLeftShoulder) { return false }
+    return true
+}
+
+private fun isLeftyCheck(keypoint: INDArray, isSideView: Boolean, numFrameCheck: Int): Boolean {
+    var isLefty: Boolean = false
+    val totalFrame: Int = keypoint.shape()[0].toInt()
+    val xLeftWrist = keypoint.get(NDArrayIndex.all(), NDArrayIndex.point(Human36M().leftWrist.toLong()), NDArrayIndex.point(0)).dup()
+    val xRightWrist = keypoint.get(NDArrayIndex.all(), NDArrayIndex.point(Human36M().rightWrist.toLong()), NDArrayIndex.point(0)).dup()
+    val xCenterWrist = xLeftWrist.add(xRightWrist).div(2.0)
+    val xLeftHip = keypoint.get(NDArrayIndex.all(), NDArrayIndex.point(Human36M().leftHip.toLong()), NDArrayIndex.point(0)).dup()
+    val xRightHip = keypoint.get(NDArrayIndex.all(), NDArrayIndex.point(Human36M().rightHip.toLong()), NDArrayIndex.point(0)).dup()
+    val xCenterHip = xLeftHip.add(xRightHip).div(2.0)
+
+    if (isSideView) {
+        val xMeanCenterWrist = xCenterWrist.get(NDArrayIndex.interval(0, minOf(numFrameCheck, totalFrame))).mean(0)
+        val xMeanCenterHip = xCenterHip.get(NDArrayIndex.interval(0, minOf(numFrameCheck, totalFrame))).mean(0)
+        isLefty = xMeanCenterHip.getDouble(0) >= xMeanCenterWrist.getDouble(0)
+    } else {
+        val minFrameCenterWrist = Nd4j.getExecutioner().execAndReturn(IMin(xCenterWrist)).finalResult.toInt()
+        val maxFrameCenterWrist = Nd4j.getExecutioner().execAndReturn(IMax(xCenterWrist)).finalResult.toInt()
+        isLefty = minFrameCenterWrist >= maxFrameCenterWrist
+
+    }
+    return isLefty
 }
 
 private fun convertCoCoToHuman36M(cocoArray: INDArray, totalFrame: Int, frameWidth: Double, frameHeight: Double): Pair<INDArray?, INDArray?> {
