@@ -1,5 +1,6 @@
 package com.example.clubpath
 
+import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -15,6 +16,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.clubpath.Motion.MotionModel
 import com.example.clubpath.components3D.Lifting3DModel
+import com.example.clubpath.components3D.ModelKptsMLP
+import com.example.clubpath.components3D.ModelLeadAnkle
 import com.example.clubpath.ui.theme.ClubPathTheme
 import com.example.clubpath.utils.SwingKeypointModel
 import com.example.clubpath.components3D.Utils3DHelper
@@ -29,6 +32,15 @@ import java.lang.ArithmeticException
 
 class MainActivity : ComponentActivity() {
     private var liftingModel: Lifting3DModel? = null
+
+    // model adjust keypoint MLP
+    private var modelKptsMlpFrontRight: ModelKptsMLP? = null
+    private var modelKptsMlpFrontLeft: ModelKptsMLP? = null
+    private var modelKptsMlpSideRight: ModelKptsMLP? = null
+    private var modelKptsMlpSideLeft: ModelKptsMLP? = null
+    private var modelKptsMLPChoose: ModelKptsMLP? = null
+    private var modelLeadAnkle: ModelLeadAnkle? = null
+
     private var motionModeltest: MotionModel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,22 +70,26 @@ class MainActivity : ComponentActivity() {
                         .initialize()
                         .addOnFailureListener { e -> Log.e("LOADING 3D", "Error to setting up 3D Lifting.", e) }
                         .await()
-//                    TfLite.initialize(context, tfliteOption.build())
-//                        .addOnSuccessListener {
-//                            Log.d("SUCCESS LOADING MODEL", "TFLite in Play Services initialized successfully.")
-//                            liftingModel = Lifting3DModel(context)
-//                        }
-//                        .await()
+                    //============= Init mlp keypoint models
+                    modelKptsMlpFrontRight = initMLPModel(context, "ModelKptsMlpFrontRight.tflite")
+                    modelKptsMlpFrontLeft = initMLPModel(context, "ModelKptsMlpFrontLeft.tflite")
+                    modelKptsMlpSideRight = initMLPModel(context, "ModelKptsMlpSideRight.tflite")
+                    modelKptsMlpSideLeft = initMLPModel(context, "ModelKptsMlpSideLeft.tflite")
+                    modelLeadAnkle = initLeadAnkleModel(context, "ModelLeadAnkle.tflite")
+
+                    /*
                     motionModeltest = MotionModel(context, "LstmTinySideMotion_float32.tflite")
                     motionModeltest!!
                         .initialize()
                         .addOnFailureListener { e -> Log.e("LOADING 3D", "Error to setting up 3D Lifting.", e) }
                         .await()
+                     */
                     Log.d("Predict3D", "Running 3D Flow.")
                     // ============= Predict 3D and PList =============== //
-                    val (raw2dH36M, processed2DH36M) = Utils3DHelper().convertCoCoToHuman36M(
+                    val totalFrame: Int = kptArray.shape()[0].toInt()
+                    val utils3DHelper = Utils3DHelper(totalFrame)
+                    val (raw2dH36M, processed2DH36M) = utils3DHelper.convertCoCoToHuman36M(
                         kptArray,
-                        totalFrame,
                         frameWidth = frameWidth,
                         frameHeight = frameHeight
                     )
@@ -83,9 +99,10 @@ class MainActivity : ComponentActivity() {
                     //=== Todo
                     //= Using tensorflow library not google service
                     if (raw2dH36M != null && processed2DH36M != null && liftingModel!!.isInitialized) {
-                        isSideView = Utils3DHelper().isSideViewCheck(raw2dH36M, 10)
-                        isLefty = Utils3DHelper().isLeftyCheck(raw2dH36M, isSideView, 10)
+                        isSideView = utils3DHelper.isSideViewCheck(raw2dH36M, 10)
+                        isLefty = utils3DHelper.isLeftyCheck(raw2dH36M, isSideView, 10)
 
+                        /*
                         //======== test motion
                         val keypointShapeTest = IntArray(2)
                         keypointShapeTest[0] = 378
@@ -93,7 +110,24 @@ class MainActivity : ComponentActivity() {
                         var dataTest = Nd4j.zeros(keypointShapeTest, DataType.DOUBLE).add(0.01)
                         val resultTest = motionModeltest?.classify(dataTest)
                         print(resultTest)
-//                        var (outputPoseGlobal3DMatft, upLift2DMatft) = Utils3DHelper().predict3D(raw2dH36M, processed2DH36M, liftingModel, isSideView, isLefty, frameWidth = frameWidth, frameHeight = frameHeight)
+                        */
+
+                        // choose MLP model following side && handness
+                        if (!isSideView && !isLefty) {
+                            modelKptsMLPChoose = modelKptsMlpFrontRight
+                        } else if (!isSideView && isLefty) {
+                            modelKptsMLPChoose = modelKptsMlpFrontLeft
+                        } else if (isSideView && !isLefty) {
+                            modelKptsMLPChoose = modelKptsMlpSideRight
+                        } else {
+                            modelKptsMLPChoose = modelKptsMlpSideLeft
+                        }
+                        var (outputPoseGlobal3DMatft, upLift2DMatft) = utils3DHelper.predict3D(raw2dH36M, processed2DH36M,
+                            liftingModel,
+                            modelKptsMLPChoose,
+                            modelLeadAnkle,
+                            isSideView, isLefty,
+                            frameWidth = frameWidth, frameHeight = frameHeight)
                     }
                 }
                 Surface(
@@ -107,9 +141,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    suspend fun initMLPModel(context: Context, modelPath: String): ModelKptsMLP {
+        val model = ModelKptsMLP(context, modelPath)
+        model
+            .initialize()
+            .addOnFailureListener { e -> Log.e("LOADING MLP", "Error to setting up 3D Lifting.", e) }
+            .await()
+        return model
+    }
+
+    suspend fun initLeadAnkleModel(context: Context, modelPath: String): ModelLeadAnkle {
+        val model = ModelLeadAnkle(context, modelPath)
+        model
+            .initialize()
+            .addOnFailureListener { e -> Log.e("LOADING Ankle", "Error to setting up 3D Lifting.", e) }
+            .await()
+        return model
+    }
+
     override fun onDestroy() {
         liftingModel?.close()
-//        liftingModel?.close()
+        modelKptsMlpFrontLeft?.close()
+        modelKptsMlpFrontRight?.close()
+        modelKptsMlpSideLeft?.close()
+        modelKptsMlpSideRight?.close()
         super.onDestroy()
     }
 }

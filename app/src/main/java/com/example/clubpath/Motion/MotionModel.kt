@@ -145,7 +145,7 @@ class MotionModel(private val context: Context, private val modelPath: String) {
         return result
     }
 
-     suspend fun classify(inPutArray: INDArray): INDArray {
+     fun classify(inPutArray: INDArray): INDArray {
         val totalFrame = inPutArray.shape()[0].toDouble()
 
         val outputShape = IntArray(2)
@@ -167,7 +167,7 @@ class MotionModel(private val context: Context, private val modelPath: String) {
 
         // mapping back Index
         var tmpOutput = Nd4j.create(outputs.floatArray)
-        tmpOutput = tmpOutput.reshape(360, 12)
+        tmpOutput = tmpOutput.reshape(outputShape[0].toLong(), outputShape[1].toLong())
 
         val idxMappingBackInput = linspace(0.0, 360.0 - 1.0, totalFrame.toInt())
         val test = tmpOutput.get(

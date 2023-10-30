@@ -1,15 +1,19 @@
 package com.example.clubpath.components3D
 
+import com.example.clubpath.Motion.MotionHelperUtils
 import com.example.clubpath.utils.CoCoFormat
 import com.example.clubpath.utils.Human36M
+import com.example.clubpath.utils.UpLift
 import org.nd4j.linalg.api.buffer.DataType
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.api.ops.impl.indexaccum.IMax
 import org.nd4j.linalg.api.ops.impl.indexaccum.IMin
 import org.nd4j.linalg.factory.Nd4j
 import org.nd4j.linalg.indexing.NDArrayIndex
+import org.nd4j.linalg.ops.transforms.Transforms
 
-class Utils3DHelper {
+class Utils3DHelper(private val totalFrame: Int) {
+
     fun isSideViewCheck(keypoint: INDArray, considerFramed: Int = 10): Boolean {
         val xHead = keypoint.getDouble(considerFramed, Human36M().head, 0)
         val xRightShoulder = keypoint.getDouble(considerFramed, Human36M().rightShoulder, 0)
@@ -21,7 +25,6 @@ class Utils3DHelper {
 
     fun isLeftyCheck(keypoint: INDArray, isSideView: Boolean, numFrameCheck: Int): Boolean {
         var isLefty: Boolean = false
-        val totalFrame: Int = keypoint.shape()[0].toInt()
         val xLeftWrist = keypoint.get(NDArrayIndex.all(), NDArrayIndex.point(Human36M().leftWrist.toLong()), NDArrayIndex.point(0)).dup()
         val xRightWrist = keypoint.get(NDArrayIndex.all(), NDArrayIndex.point(Human36M().rightWrist.toLong()), NDArrayIndex.point(0)).dup()
         val xCenterWrist = xLeftWrist.add(xRightWrist).div(2.0)
@@ -42,7 +45,7 @@ class Utils3DHelper {
         return isLefty
     }
 
-    fun convertCoCoToHuman36M(cocoArray: INDArray, totalFrame: Int, frameWidth: Double, frameHeight: Double): Pair<INDArray?, INDArray?> {
+    fun convertCoCoToHuman36M(cocoArray: INDArray, frameWidth: Double, frameHeight: Double): Pair<INDArray?, INDArray?> {
         val keypointShape = IntArray(3)
         keypointShape[0] = totalFrame
         keypointShape[1] = 17
@@ -80,12 +83,11 @@ class Utils3DHelper {
             kptHuman36M.get(NDArrayIndex.all(), NDArrayIndex.point(h36mIdx.toLong()), NDArrayIndex.all())
                 .assign(cocoArray.get(NDArrayIndex.all(), NDArrayIndex.point(cocoMappingIdx[idx].toLong()), NDArrayIndex.all()))
         }
-        val normedKpt2D = normalizeScreenCoordinate(kptHuman36M, totalFrame, frameWidth, frameHeight)
+        val normedKpt2D = normalizeScreenCoordinate(kptHuman36M, frameWidth, frameHeight)
         return Pair(kptHuman36M, normedKpt2D)
     }
 
     fun normalizeScreenCoordinate(h36mArray: INDArray,
-                                  totalFrame: Int,
                                   frameWidth: Double, frameHeight: Double,
                                   numJoint: Int = 17): INDArray {
         val keypointShape = IntArray(3)
@@ -103,27 +105,229 @@ class Utils3DHelper {
 
     fun predict3D(rawKptHuman36m: INDArray, processedHuman36M: INDArray,
                   liftingModel: Lifting3DModel?,
+                  modelMLP: ModelKptsMLP?,
+                  modelLeadAnkle: ModelLeadAnkle?,
                   isSideView: Boolean, isLefty: Boolean,
                   frameWidth: Double, frameHeight: Double): Pair<INDArray?, INDArray?> {
         if (liftingModel == null) { return Pair(null, null) }
-        val totalFrame: Int = rawKptHuman36m.shape()[0].toInt()
-        val upLift2D = mappingUpliftOrder(rawKptHuman36m, totalFrame)
+        val keypointShape = IntArray(3)
+        keypointShape[0] = totalFrame
+        keypointShape[1] = 16
+        keypointShape[2] = 2
+        val upLift2D = mappingUpliftOrder(rawKptHuman36m, keypointShape)
+        var videoUpLiftKpts3D = Nd4j.zeros(totalFrame, 16, 3)
 
+        // ================== TOO SLOW ================== //
         for (frameIndex in 0 until totalFrame) {
             val poseSequence2D = extractPoseSequence(processedHuman36M, frameIndex)
             val result3D = liftingModel.classify(poseSequence2D)
             //===== TODO
             // adjust 3d keypoints
+            val inputMLPRegressor = preProcessModelRegressor(result3D, isSideView, isLefty)
+            val resultMLP = modelMLP?.classify(inputMLPRegressor)
+            videoUpLiftKpts3D[NDArrayIndex.point(frameIndex.toLong()), NDArrayIndex.all(), NDArrayIndex.all()]
+                .assign(resultMLP)
+            print(resultMLP)
         }
-        return Pair(null, null)
+        // ================== TOO SLOW ================== //
+        val updatedPose3D = postProcessModelRegressor(videoUpLiftKpts3D,
+                                                    upLift2D,
+                                                    modelLeadAnkle,
+                                                    isSideView,
+                                                    isLefty,
+                                                    frameWidth,
+                                                    frameHeight)
+        return Pair(updatedPose3D, upLift2D)
     }
 
-    private fun mappingUpliftOrder(h36mArray: INDArray, totalFrame: Int): INDArray {
-        val keypointShape = IntArray(3)
-        keypointShape[0] = totalFrame
-        keypointShape[1] = 16
-        keypointShape[2] = 2
+    private fun postProcessModelRegressor(regressor3D: INDArray, current2DUplift: INDArray,
+                                          modelLeadAnkle: ModelLeadAnkle?,
+                                            isSideView: Boolean, isLefty: Boolean,
+                                            width: Double, height: Double): INDArray? {
 
+        // Normalize smooth 3d
+        val globalHumanHeight = MotionHelperUtils().findDeltaAxis(regressor3D, 75)
+        val normed3D = regressor3D.dup().div(globalHumanHeight)
+
+        //---- find smooth ankle values
+        val normed3DCopy = normed3D.dup().reshape(totalFrame.toLong(), 48)
+        val leadAnkleSmoothResult = modelLeadAnkle?.classify(normed3DCopy) // [totalFrame, 1]
+
+        if (leadAnkleSmoothResult != null) {
+            return gen3DGlobal(
+                normed3D, current2DUplift,
+                isSideView, isLefty,
+                width, height,
+                leadAnkleSmoothResult!!
+            )
+        }
+        return null
+    }
+
+    private fun gen3DGlobal(upLift3D: INDArray, uplift2DRaw: INDArray,
+                            isSideView: Boolean, isLefty: Boolean,
+                            width: Double, height: Double,
+                            leadAnklePred: INDArray): INDArray {
+        val pixelScaleBackUplift: Double = height / 2.0
+        val intArrayShape = IntArray(3)
+        intArrayShape[0] = totalFrame
+        intArrayShape[1] = 16
+        intArrayShape[2] = 2
+        var kptHorizonVert3D = Nd4j.zeros(intArrayShape, DataType.DOUBLE)
+
+        if (isSideView) {
+            kptHorizonVert3D
+                .assign(
+                    upLift3D[NDArrayIndex.all(), NDArrayIndex.all(), NDArrayIndex.indices(0, 1)].dup() // take Oz, Oy
+                )
+        } else {
+            kptHorizonVert3D
+                .assign(
+                    upLift3D[NDArrayIndex.all(), NDArrayIndex.all(), NDArrayIndex.indices(2, 1)].dup()
+                )
+        }
+
+        //extract xy of ankle and head coordinate from kpts_2d
+        val rAnkleXY3D = kptHorizonVert3D[NDArrayIndex.all(), NDArrayIndex.point(UpLift().rightAnkle.toLong()), NDArrayIndex.all()]
+        val lAnkleXY3D = kptHorizonVert3D[NDArrayIndex.all(), NDArrayIndex.point(UpLift().leftAnkle.toLong()), NDArrayIndex.all()]
+        val midAnkleXY3D = rAnkleXY3D.add(lAnkleXY3D).div(2.0)
+        val cShoulderXY3D = kptHorizonVert3D[NDArrayIndex.all(), NDArrayIndex.point(UpLift().centerShoulder.toLong()), NDArrayIndex.all()]
+
+        // extract xy of ankle and head coordinate from kpts_2d
+        val rAnkle2D = uplift2DRaw[NDArrayIndex.all(), NDArrayIndex.point(UpLift().rightAnkle.toLong()), NDArrayIndex.all()]
+        val lAnkle2D = uplift2DRaw[NDArrayIndex.all(), NDArrayIndex.point(UpLift().leftAnkle.toLong()), NDArrayIndex.all()]
+        val midAnkle2D = rAnkle2D.add(lAnkle2D).div(2.0)
+        val cShoulder2D = uplift2DRaw[NDArrayIndex.all(), NDArrayIndex.point(UpLift().centerShoulder.toLong()), NDArrayIndex.all()]
+
+        val lSa = Transforms.euclideanDistance(cShoulderXY3D, midAnkleXY3D)
+        val lSaPixel = Transforms.euclideanDistance(cShoulder2D, midAnkle2D)
+
+        val scale: Double = lSaPixel / (lSa + 0.000001)
+        val kpts3DZoom = upLift3D.mul(scale)
+
+        val kpts3DXYZoom = kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.all(), NDArrayIndex.indices(2, 1)]
+        val kpts3DZYZoom = kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.all(), NDArrayIndex.indices(0, 1)]
+
+        val leadAnkle2D = if (isLefty) {
+            rAnkle2D
+        } else {
+            lAnkle2D
+        }
+
+        val leadAnkleXY3DZoom = if (isLefty) {
+            kpts3DXYZoom[NDArrayIndex.all(), NDArrayIndex.point(0), NDArrayIndex.all()]
+        } else {
+            kpts3DXYZoom[NDArrayIndex.all(), NDArrayIndex.point(5), NDArrayIndex.all()]
+        }
+
+        val leadAnkleZ3DZoom = if (isLefty) {
+            kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.point(0), NDArrayIndex.all()]
+        } else {
+            kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.point(5), NDArrayIndex.all()]
+        } // get axis 0
+
+        val leadAnkleZY3DZoom = if (isLefty) {
+            kpts3DZYZoom[NDArrayIndex.all(), NDArrayIndex.point(0), NDArrayIndex.all()]
+        } else {
+            kpts3DZYZoom[NDArrayIndex.all(), NDArrayIndex.point(5), NDArrayIndex.all()]
+        }
+
+        val leadAnkleX3DZoom = if (isLefty) {
+            kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.point(0), NDArrayIndex.all()]
+        } else {
+            kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.point(5), NDArrayIndex.all()]
+        } //get axis 2 -> Matft need 2 dimension array with stride
+
+        // Output global 3D
+        val leadAnkle2DZSignal = leadAnklePred.mul(scale)
+        val leadAnkle2DXSignal = leadAnkle2DZSignal.dup()
+        // Output global 3D
+        val intArrayShape3D = IntArray(3)
+        intArrayShape3D[0] = totalFrame
+        intArrayShape3D[1] = 16
+        intArrayShape3D[2] = 3
+        var kpts3DGlobal = Nd4j.zeros(intArrayShape3D, DataType.DOUBLE)
+
+        for (jointIdx in 0 until 16) {
+            var tmpX: INDArray?
+            var tmpLead2D: INDArray?
+            if (isSideView) {
+                tmpX = kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(2)]
+                            .sub(leadAnkleX3DZoom[NDArrayIndex.all(), NDArrayIndex.point(2)])
+                            .add(leadAnkle2DXSignal[NDArrayIndex.all(), NDArrayIndex.point(0)])
+                tmpLead2D = kpts3DZYZoom[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.all()]
+                                .sub(leadAnkleZY3DZoom)
+                                .add(leadAnkle2D)
+                tmpLead2D[NDArrayIndex.all(), NDArrayIndex.point(2)]
+                    .assign(tmpX)
+
+                kpts3DGlobal[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.all()]
+                    .assign(tmpLead2D)
+            } else {
+                tmpX = kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(0)]
+                    .sub(leadAnkleZ3DZoom[NDArrayIndex.all(), NDArrayIndex.point(0)])
+                    .add(leadAnkle2DZSignal[NDArrayIndex.all(), NDArrayIndex.point(0)])
+                kpts3DGlobal[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(0)]
+                    .assign(tmpX)
+
+                tmpLead2D = kpts3DXYZoom[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.all()]
+                    .sub(leadAnkleXY3DZoom)
+                    .add(leadAnkle2D)
+                kpts3DGlobal[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(2)]
+                    .assign(tmpLead2D[NDArrayIndex.all(), NDArrayIndex.point(0)])
+                kpts3DGlobal[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(1)]
+                    .assign(tmpLead2D[NDArrayIndex.all(), NDArrayIndex.point(1)])
+            }
+        }
+
+        kpts3DGlobal.div(pixelScaleBackUplift + 0.000001)
+
+        return kpts3DGlobal
+    }
+
+    private fun preProcessModelRegressor(resultLifting: INDArray, isSideView: Boolean, isLefty: Boolean): INDArray {
+        // convert Adaptpose to Human3.6M keypoints, re-add nose joint
+        var h36m3D = Nd4j.zeros(1, 17, 3)
+        h36m3D[NDArrayIndex.point(0), NDArrayIndex.interval(0, 9), NDArrayIndex.all()]
+            .assign(resultLifting[NDArrayIndex.point(0), NDArrayIndex.interval(0, 9), NDArrayIndex.all()].dup())
+        h36m3D[NDArrayIndex.point(0), NDArrayIndex.interval(10, 17), NDArrayIndex.all()]
+            .assign(resultLifting[NDArrayIndex.point(0), NDArrayIndex.interval(9, 16), NDArrayIndex.all()].dup())
+
+        val noseJoint = h36m3D[NDArrayIndex.point(0), NDArrayIndex.point(8), NDArrayIndex.all()].dup().div(2.0)
+            .add(h36m3D[NDArrayIndex.point(0), NDArrayIndex.point(10), NDArrayIndex.all()].dup().div(2.0))
+        h36m3D[NDArrayIndex.point(0), NDArrayIndex.point(9), NDArrayIndex.all()]
+            .assign(noseJoint)
+
+        if (!isSideView) {
+            for (jointIdx in 0 until 17) {
+                var tmpX = h36m3D[NDArrayIndex.point(0), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(0)].dup()
+                /*
+                if (isLefty) {
+                    tmpX = tmpX.mul(-1.0)
+                }
+                 */
+//                val tmpY = h36m3D[NDArrayIndex.point(0), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(1)].dup()
+                val tmpZ = h36m3D[NDArrayIndex.point(0), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(2)].dup().mul(-1.0)
+
+                h36m3D[NDArrayIndex.point(0), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(0)].assign(tmpZ)
+//                h36m3D[NDArrayIndex.point(0), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(1)].assign(tmpY)
+                h36m3D[NDArrayIndex.point(0), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(2)].assign(tmpX)
+            }
+        }
+
+        //3D Human3.6 to Uplift
+        val keypointShape = IntArray(3)
+        keypointShape[0] = 1
+        keypointShape[1] = 16
+        keypointShape[2] = 3
+        var upLift3D = mappingUpliftOrder(h36m3D, keypointShape)
+        upLift3D = upLift3D.reshape(1, 48)
+
+        return upLift3D
+    }
+
+
+    private fun mappingUpliftOrder(h36mArray: INDArray, keypointShape: IntArray): INDArray {
         val upliftOrder = intArrayOf(3,2,1,4,5,6,0,8,10,9,16,15,14,11,12,13)
         var upliftKpt = Nd4j.zeros(keypointShape, DataType.DOUBLE)
 
@@ -140,8 +344,6 @@ class Utils3DHelper {
         tempFrameLength: Int = 27
     ): INDArray {
         var input2D = Nd4j.zeros(tempFrameLength, 17, 2)
-        var sequenceInput = Nd4j.zeros(tempFrameLength, 16, 2)
-        var desiredJoint = intArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16)
         val frameLeft: Int = (tempFrameLength - 1) / 2
         val frameRight = frameLeft
         val numFrames: Int = keypointProcesses.shape()[0].toInt()
