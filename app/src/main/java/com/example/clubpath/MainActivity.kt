@@ -13,13 +13,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
+import com.example.clubpath.Motion.MotionModel
 import com.example.clubpath.components3D.Lifting3DModel
 import com.example.clubpath.ui.theme.ClubPathTheme
 import com.example.clubpath.utils.SwingKeypointModel
 import com.example.clubpath.components3D.Utils3DHelper
 import com.example.clubpath.utils.readJSONFromAssets
-import com.google.android.gms.tflite.client.TfLiteInitializationOptions
-import com.google.android.gms.tflite.java.TfLite
+//import com.google.android.gms.tflite.client.TfLiteInitializationOptions
+//import com.google.android.gms.tflite.java.TfLite
 import kotlinx.coroutines.tasks.await
 import org.nd4j.linalg.api.buffer.DataType
 import org.nd4j.linalg.api.ndarray.INDArray
@@ -27,7 +28,8 @@ import org.nd4j.linalg.factory.Nd4j
 import java.lang.ArithmeticException
 
 class MainActivity : ComponentActivity() {
-    private var classifier: Lifting3DModel? = null
+    private var liftingModel: Lifting3DModel? = null
+    private var motionModeltest: MotionModel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,18 +48,27 @@ class MainActivity : ComponentActivity() {
                 // A surface container using the 'background' color from the theme
                 val context = LocalContext.current
                 val useGPU = false
-                val tfliteOption = TfLiteInitializationOptions.builder()
-                if (useGPU) {
-                    tfliteOption.setEnableGpuDelegateSupport(true)
-                }
+//                val tfliteOption = TfLiteInitializationOptions.builder()
+//                if (useGPU) {
+//                    tfliteOption.setEnableGpuDelegateSupport(true)
+//                }
                 LaunchedEffect(key1 = Unit) {
-                    TfLite.initialize(context, tfliteOption.build())
-                        .addOnSuccessListener {
-                            Log.d("SUCCESS LOADING MODEL", "TFLite in Play Services initialized successfully.")
-                            classifier = Lifting3DModel(context)
-                        }
+                    liftingModel = Lifting3DModel(context)
+                    liftingModel!!
+                        .initialize()
+                        .addOnFailureListener { e -> Log.e("LOADING 3D", "Error to setting up 3D Lifting.", e) }
                         .await()
-
+//                    TfLite.initialize(context, tfliteOption.build())
+//                        .addOnSuccessListener {
+//                            Log.d("SUCCESS LOADING MODEL", "TFLite in Play Services initialized successfully.")
+//                            liftingModel = Lifting3DModel(context)
+//                        }
+//                        .await()
+                    motionModeltest = MotionModel(context, "LstmTinySideMotion_float32.tflite")
+                    motionModeltest!!
+                        .initialize()
+                        .addOnFailureListener { e -> Log.e("LOADING 3D", "Error to setting up 3D Lifting.", e) }
+                        .await()
                     Log.d("Predict3D", "Running 3D Flow.")
                     // ============= Predict 3D and PList =============== //
                     val (raw2dH36M, processed2DH36M) = Utils3DHelper().convertCoCoToHuman36M(
@@ -68,11 +79,21 @@ class MainActivity : ComponentActivity() {
                     )
                     var isSideView: Boolean = false
                     var isLefty: Boolean = false
-                    if (raw2dH36M != null && processed2DH36M != null) {
+
+                    //=== Todo
+                    //= Using tensorflow library not google service
+                    if (raw2dH36M != null && processed2DH36M != null && liftingModel!!.isInitialized) {
                         isSideView = Utils3DHelper().isSideViewCheck(raw2dH36M, 10)
                         isLefty = Utils3DHelper().isLeftyCheck(raw2dH36M, isSideView, 10)
 
-                        var (outputPoseGlobal3DMatft, upLift2DMatft) = Utils3DHelper().predict3D(raw2dH36M, processed2DH36M, isSideView, isLefty, frameWidth = frameWidth, frameHeight = frameHeight)
+                        //======== test motion
+                        val keypointShapeTest = IntArray(2)
+                        keypointShapeTest[0] = 378
+                        keypointShapeTest[1] = 48
+                        var dataTest = Nd4j.zeros(keypointShapeTest, DataType.DOUBLE).add(0.01)
+                        val resultTest = motionModeltest?.classify(dataTest)
+                        print(resultTest)
+//                        var (outputPoseGlobal3DMatft, upLift2DMatft) = Utils3DHelper().predict3D(raw2dH36M, processed2DH36M, liftingModel, isSideView, isLefty, frameWidth = frameWidth, frameHeight = frameHeight)
                     }
                 }
                 Surface(
@@ -87,7 +108,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        classifier?.close()
+        liftingModel?.close()
+//        liftingModel?.close()
         super.onDestroy()
     }
 }

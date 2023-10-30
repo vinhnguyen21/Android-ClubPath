@@ -102,13 +102,18 @@ class Utils3DHelper {
     }
 
     fun predict3D(rawKptHuman36m: INDArray, processedHuman36M: INDArray,
+                  liftingModel: Lifting3DModel?,
                   isSideView: Boolean, isLefty: Boolean,
                   frameWidth: Double, frameHeight: Double): Pair<INDArray?, INDArray?> {
+        if (liftingModel == null) { return Pair(null, null) }
         val totalFrame: Int = rawKptHuman36m.shape()[0].toInt()
         val upLift2D = mappingUpliftOrder(rawKptHuman36m, totalFrame)
 
         for (frameIndex in 0 until totalFrame) {
             val poseSequence2D = extractPoseSequence(processedHuman36M, frameIndex)
+            val result3D = liftingModel.classify(poseSequence2D)
+            //===== TODO
+            // adjust 3d keypoints
         }
         return Pair(null, null)
     }
@@ -129,10 +134,14 @@ class Utils3DHelper {
         return upliftKpt
     }
 
-    private fun extractPoseSequence(keypointProcesses: INDArray, currentFrameIdx: Int, tempFrameLength: Int = 27): INDArray {
+    private fun extractPoseSequence(
+        keypointProcesses: INDArray,
+        currentFrameIdx: Int,
+        tempFrameLength: Int = 27
+    ): INDArray {
         var input2D = Nd4j.zeros(tempFrameLength, 17, 2)
         var sequenceInput = Nd4j.zeros(tempFrameLength, 16, 2)
-        var desiredJoint = intArrayOf(0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,16)
+        var desiredJoint = intArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16)
         val frameLeft: Int = (tempFrameLength - 1) / 2
         val frameRight = frameLeft
         val numFrames: Int = keypointProcesses.shape()[0].toInt()
@@ -146,36 +155,54 @@ class Utils3DHelper {
         // retrieve sequence frames
         if (padLeft != 0) {
             for (leftIdx in 0 until padLeft) {
-                input2D.get(NDArrayIndex.point(leftIdx.toLong()), NDArrayIndex.all(), NDArrayIndex.all())
-                    .assign(keypointProcesses.getRow(0)) //keypointProcesses[0, Matft.all, Matft.all]
+                input2D.get(
+                    NDArrayIndex.point(leftIdx.toLong()),
+                    NDArrayIndex.all(),
+                    NDArrayIndex.all()
+                )
+                    .assign(keypointProcesses.get(NDArrayIndex.point(0), NDArrayIndex.all(), NDArrayIndex.all()))
             }
 
-            for (tmpIdx in startIdx until  endIdx) {
-                input2D.get(NDArrayIndex.point((padLeft + tmpIdx).toLong()), NDArrayIndex.all(), NDArrayIndex.all())
-                    .assign(keypointProcesses.getRow(tmpIdx.toLong())) //keypointProcesses[tmpIdx, Matft.all, Matft.all]
+            for (tmpIdx in startIdx until endIdx) {
+                input2D.get(
+                    NDArrayIndex.point((padLeft + tmpIdx).toLong()),
+                    NDArrayIndex.all(),
+                    NDArrayIndex.all()
+                )
+                    .assign(keypointProcesses.get(NDArrayIndex.point(tmpIdx.toLong()), NDArrayIndex.all(), NDArrayIndex.all()))
             }
-        }
-        else  {
+        } else {
             if (padRight != 0) {
                 for (rightIdx in 0 until padRight) {
-                    input2D.get(NDArrayIndex.point((tempFrameLength - rightIdx - 1).toLong()), NDArrayIndex.all(), NDArrayIndex.all())
-                        .assign(keypointProcesses.getRow((numFrames - 1).toLong())) //keypointProcesses[-1, Matft.all, Matft.all]
+                    input2D.get(
+                        NDArrayIndex.point((tempFrameLength - rightIdx - 1).toLong()),
+                        NDArrayIndex.all(),
+                        NDArrayIndex.all()
+                    )
+                        .assign(keypointProcesses.get(NDArrayIndex.point((numFrames - 1).toLong()), NDArrayIndex.all(), NDArrayIndex.all()))
                 }
             }
             for ((inputIdx, processIdx) in (0 until (tempFrameLength - padRight)).zip(startIdx until endIdx)) {
-                input2D.get(NDArrayIndex.point(inputIdx.toLong()), NDArrayIndex.all(), NDArrayIndex.all())
-                    .assign(keypointProcesses.getRow(processIdx.toLong()))
+                input2D.get(
+                    NDArrayIndex.point(inputIdx.toLong()),
+                    NDArrayIndex.all(),
+                    NDArrayIndex.all()
+                )
+                    .assign(keypointProcesses.get(NDArrayIndex.point(processIdx.toLong()), NDArrayIndex.all(), NDArrayIndex.all()))
             }
         }
 
         // remove Nose Joint
         val noseJoint = 9
-        var updatedArray = Nd4j.zeros(1, tempFrameLength, 16, 2)
-        updatedArray.getRow(0)
-            .assign(Nd4j.concat(1,
-                input2D.get(NDArrayIndex.interval(0, noseJoint), NDArrayIndex.all(), NDArrayIndex.all()).dup(),
-                input2D.get(NDArrayIndex.interval(noseJoint + 1, input2D.shape()[1].toInt()), NDArrayIndex.all(), NDArrayIndex.all()).dup()
-            ))
-        return updatedArray
+        val updateArray = Nd4j.concat(
+            1,
+            input2D.get(NDArrayIndex.all(), NDArrayIndex.interval(0, noseJoint), NDArrayIndex.all()).dup(),
+            input2D.get(
+            NDArrayIndex.all(),
+            NDArrayIndex.interval(noseJoint + 1, input2D.shape()[1].toInt()),
+            NDArrayIndex.all()
+        ).dup()
+        )
+        return updateArray
     }
 }

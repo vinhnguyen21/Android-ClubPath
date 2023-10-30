@@ -27,6 +27,7 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
@@ -70,13 +71,15 @@ dependencies {
     implementation "org.nd4j:nd4j-native-platform:1.0.0-beta6"
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.0")
 
-    // Tensorflow Lite in Play Services dependencies
-//    implementation 'org.tensorflow:tensorflow-lite:2.11.0'
-//    implementation 'org.tensorflow:tensorflow-lite-gpu:2.13.0'
-//    implementation 'org.tensorflow:tensorflow-lite-support:0.4.0'
+    //===== Tensorflow Lite in Play Services dependencies
+    implementation 'org.tensorflow:tensorflow-lite:2.12.0'
+    implementation 'org.tensorflow:tensorflow-lite-gpu:2.12.0'
+    implementation 'org.tensorflow:tensorflow-lite-support:0.4.2'
+
+    //===== Google service
 //    implementation 'com.google.android.gms:play-services-tflite-gpu:16.2.0'
-    implementation 'com.google.android.gms:play-services-tflite-gpu:16.2.0'
-    implementation 'com.google.android.gms:play-services-tflite-java:16.1.0'
-    implementation 'com.google.android.gms:play-services-tflite-support:16.1.0'
+//    implementation 'com.google.android.gms:play-services-tflite-java:16.1.0'
+//    implementation 'com.google.android.gms:play-services-tflite-support:16.1.0'
+
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
 }
