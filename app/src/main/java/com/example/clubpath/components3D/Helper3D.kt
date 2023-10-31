@@ -127,7 +127,6 @@ class Utils3DHelper(private val totalFrame: Int) {
             val resultMLP = modelMLP?.classify(inputMLPRegressor)
             videoUpLiftKpts3D[NDArrayIndex.point(frameIndex.toLong()), NDArrayIndex.all(), NDArrayIndex.all()]
                 .assign(resultMLP)
-            print(resultMLP)
         }
         // ================== TOO SLOW ================== //
         val updatedPose3D = postProcessModelRegressor(videoUpLiftKpts3D,
@@ -199,12 +198,18 @@ class Utils3DHelper(private val totalFrame: Int) {
         val midAnkle2D = rAnkle2D.add(lAnkle2D).div(2.0)
         val cShoulder2D = uplift2DRaw[NDArrayIndex.all(), NDArrayIndex.point(UpLift().centerShoulder.toLong()), NDArrayIndex.all()]
 
-        val lSa = Transforms.euclideanDistance(cShoulderXY3D, midAnkleXY3D)
-        val lSaPixel = Transforms.euclideanDistance(cShoulder2D, midAnkle2D)
+        val lSa = cShoulderXY3D.dup().sub(midAnkleXY3D).norm1(1)//Transforms.euclideanDistance(cShoulderXY3D, midAnkleXY3D)
+        val lSaPixel = cShoulder2D.dup().sub(midAnkle2D).norm1(1)//Transforms.euclideanDistance(cShoulder2D, midAnkle2D)
 
-        val scale: Double = lSaPixel / (lSa + 0.000001)
-        val kpts3DZoom = upLift3D.mul(scale)
-
+        val scale = lSaPixel.div(lSa.add(0.000001))
+//        val tmpScale = scale.reshape(totalFrame.toLong(), 1, 1)
+        var kpts3DZoom = Nd4j.zeros(totalFrame, 16, 3)
+        for (frameIdx in 0 until totalFrame) {
+            kpts3DZoom[NDArrayIndex.point(frameIdx.toLong())]
+                .assign(upLift3D[NDArrayIndex.point(frameIdx.toLong())]
+                            .mul(scale[NDArrayIndex.point(frameIdx.toLong())]))
+        }
+         //.mulColumnVector()
         val kpts3DXYZoom = kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.all(), NDArrayIndex.indices(2, 1)]
         val kpts3DZYZoom = kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.all(), NDArrayIndex.indices(0, 1)]
 
@@ -280,7 +285,7 @@ class Utils3DHelper(private val totalFrame: Int) {
             }
         }
 
-        kpts3DGlobal.div(pixelScaleBackUplift + 0.000001)
+        kpts3DGlobal = kpts3DGlobal.div(pixelScaleBackUplift + 0.000001)
 
         return kpts3DGlobal
     }
