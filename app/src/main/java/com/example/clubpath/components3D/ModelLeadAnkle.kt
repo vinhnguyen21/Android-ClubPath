@@ -128,7 +128,6 @@ class ModelLeadAnkle (private val context: Context, private val modelPath: Strin
         var outputs = TensorBuffer.createFixedSize(outputShape, DataType.FLOAT32)
         val inputModel = processLeadAnkleInput(inputMotion)
 
-        Log.d(TAG, "stand here")
         // Run inference using the TFLite model.
         interpreter?.run(inputModel, outputs.buffer.rewind())
 

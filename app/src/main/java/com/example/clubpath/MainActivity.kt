@@ -32,7 +32,6 @@ import java.lang.ArithmeticException
 
 class MainActivity : ComponentActivity() {
     private var liftingModel: Lifting3DModel? = null
-
     // model adjust keypoint MLP
     private var modelKptsMlpFrontRight: ModelKptsMLP? = null
     private var modelKptsMlpFrontLeft: ModelKptsMLP? = null

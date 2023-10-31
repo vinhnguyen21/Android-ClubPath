@@ -20,6 +20,7 @@ import java.util.concurrent.Executors
 
 class ModelKptsMLP(private val context: Context, private val modelPath: String) {
     private var interpreter: Interpreter? = null
+    private val numberThreads: Int = 4
     private val keypointBuffer: TensorBuffer by lazy {
         val probabilityTensorIndex = 0
         val arrayShape =
@@ -51,12 +52,14 @@ class ModelKptsMLP(private val context: Context, private val modelPath: String) 
         // Load the TF Lite model from asset folder and initialize TF Lite Interpreter with NNAPI enabled.
         val assetManager = context.assets
         val model = loadModelFile(assetManager, modelPath)
-        val interpreter = Interpreter(model)
+        val option = Interpreter.Options()
+        option.numThreads = numberThreads
+        val interpreter = Interpreter(model, option)
 
         // TODO: Read the model input shape from model file.
 
         // Read input shape from model file.
-        val inputShape = interpreter.getInputTensor(0).shape()
+//        val inputShape = interpreter.getInputTensor(0).shape()
 
         // Finish interpreter initialization.
         this.interpreter = interpreter
@@ -96,7 +99,6 @@ class ModelKptsMLP(private val context: Context, private val modelPath: String) 
 
     fun classify(inPutArray: INDArray): INDArray {
         val inputModel = initMLPInput(inPutArray)
-        Log.d("MLP keypoints", "stand here")
         interpreter?.run(inputModel, keypointBuffer.buffer.rewind())
 
         // convert to INDArray

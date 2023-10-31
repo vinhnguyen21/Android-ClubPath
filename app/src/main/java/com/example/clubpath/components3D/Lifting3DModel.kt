@@ -17,9 +17,14 @@ import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import org.tensorflow.lite.gpu.GpuDelegate
 
 class Lifting3DModel(private val context: Context) {
     private var interpreter: Interpreter? = null
+    private var gpuDelegate: GpuDelegate? = null
+
+    private val numberThreads: Int = 4
+
     private val keypoint3dBuffer: TensorBuffer by lazy {
         val probabilityTensorIndex = 0
         val arrayShape =
@@ -51,7 +56,13 @@ class Lifting3DModel(private val context: Context) {
         // Load the TF Lite model from asset folder and initialize TF Lite Interpreter with NNAPI enabled.
         val assetManager = context.assets
         val model = loadModelFile(assetManager, MODEL_PATH)
-        val interpreter = Interpreter(model)
+
+        gpuDelegate = GpuDelegate()
+        val option = Interpreter.Options()
+        option.numThreads = numberThreads
+//            .addDelegate(gpuDelegate)
+
+        val interpreter = Interpreter(model, option)
 
         // TODO: Read the model input shape from model file.
 
@@ -78,6 +89,7 @@ class Lifting3DModel(private val context: Context) {
     fun close() {
         executorService.execute {
             interpreter?.close()
+            gpuDelegate?.close()
             Log.d(TAG, "Closed TFLite interpreter.")
         }
     }
@@ -96,7 +108,6 @@ class Lifting3DModel(private val context: Context) {
 
     fun classify(inPutArray: INDArray): INDArray {
         val inputModel = init3DInput(inPutArray)
-        Log.d("3D", "stand here")
         interpreter?.run(inputModel, keypoint3dBuffer.buffer.rewind())
 
         // convert to INDArray

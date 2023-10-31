@@ -74,7 +74,14 @@ dependencies {
     //===== Tensorflow Lite in Play Services dependencies
     implementation 'org.tensorflow:tensorflow-lite:2.12.0'
     implementation 'org.tensorflow:tensorflow-lite-gpu:2.12.0'
+    implementation 'org.tensorflow:tensorflow-lite-gpu-api:2.12.0'
     implementation 'org.tensorflow:tensorflow-lite-support:0.4.2'
+    implementation 'org.tensorflow:tensorflow-lite-gpu-delegate-plugin:0.4.4'
+
+//    implementation 'org.tensorflow:tensorflow-lite:2.9.0'
+//    implementation 'org.tensorflow:tensorflow-lite-gpu:2.9.0'
+//    implementation 'org.tensorflow:tensorflow-lite-gpu-delegate-plugin:0.4.1'
+//    implementation 'org.tensorflow:tensorflow-lite-support:0.4.1'
 
     //===== Google service
 //    implementation 'com.google.android.gms:play-services-tflite-gpu:16.2.0'
