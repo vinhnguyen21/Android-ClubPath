@@ -7,11 +7,8 @@ import com.example.clubpath.utils.Human36M
 import com.example.clubpath.utils.UpLift
 import org.nd4j.linalg.api.buffer.DataType
 import org.nd4j.linalg.api.ndarray.INDArray
-import org.nd4j.linalg.api.ops.impl.indexaccum.IMax
-import org.nd4j.linalg.api.ops.impl.indexaccum.IMin
 import org.nd4j.linalg.factory.Nd4j
 import org.nd4j.linalg.indexing.NDArrayIndex
-import org.nd4j.linalg.ops.transforms.Transforms
 import kotlin.system.measureTimeMillis
 
 class Utils3DHelper(private val totalFrame: Int) {
@@ -39,8 +36,8 @@ class Utils3DHelper(private val totalFrame: Int) {
             val xMeanCenterHip = xCenterHip.get(NDArrayIndex.interval(0, minOf(numFrameCheck, totalFrame))).mean(0)
             isLefty = xMeanCenterHip.getDouble(0) >= xMeanCenterWrist.getDouble(0)
         } else {
-            val minFrameCenterWrist = Nd4j.getExecutioner().execAndReturn(IMin(xCenterWrist)).finalResult.toInt()
-            val maxFrameCenterWrist = Nd4j.getExecutioner().execAndReturn(IMax(xCenterWrist)).finalResult.toInt()
+            val minFrameCenterWrist = xCenterWrist.toDoubleVector().withIndex().minBy { it.value }.index//Nd4j.getExecutioner().execAndReturn(IMin(xCenterWrist)).finalResult.toInt()
+            val maxFrameCenterWrist = xCenterWrist.toDoubleVector().withIndex().maxBy { it.value }.index
             isLefty = minFrameCenterWrist >= maxFrameCenterWrist
 
         }
@@ -52,6 +49,7 @@ class Utils3DHelper(private val totalFrame: Int) {
         keypointShape[0] = totalFrame
         keypointShape[1] = 17
         keypointShape[2] = 2
+
         var kptHuman36M = Nd4j.zeros(keypointShape, DataType.DOUBLE)
 
         // pelvis is in the middle of l_hip and r_hip
@@ -125,6 +123,9 @@ class Utils3DHelper(private val totalFrame: Int) {
             for (frameIndex in 0 until totalFrame) {
                 val poseSequence2D = extractPoseSequence(processedHuman36M, frameIndex)
                 val result3D = liftingModel.classify(poseSequence2D!!)
+                if (frameIndex == 359) {
+                    print("")
+                }
                 //===== TODO
                 // adjust 3d keypoints
                 var inputMLPRegressor: INDArray?
@@ -138,7 +139,6 @@ class Utils3DHelper(private val totalFrame: Int) {
 
                 Log.d("ONLY MLP", "Time $timeMLP ms")
             }
-
 
             // ================== TOO SLOW ================== //
             updatedPose3D = postProcessModelRegressor(
@@ -322,7 +322,7 @@ class Utils3DHelper(private val totalFrame: Int) {
         }
 
         if (!isSideView) {
-            val tmpX = h36m3D[NDArrayIndex.point(0), NDArrayIndex.all(), NDArrayIndex.point(0)]
+            val tmpX = h36m3D[NDArrayIndex.point(0), NDArrayIndex.all(), NDArrayIndex.point(0)].dup()
             /*
             if (isLefty) {
                 tmpX = tmpX.mul(-1.0)
