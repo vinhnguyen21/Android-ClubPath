@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
+import com.example.clubpath.Motion.MotionHelperUtils
 import com.example.clubpath.Motion.MotionModel
 import com.example.clubpath.Motion.MotionPredictor
 import com.example.clubpath.components3D.Lifting3DModel
@@ -129,6 +130,10 @@ class MainActivity : ComponentActivity() {
                         }
 
                         if (outputPoseGlobal3D != null && upLift2D != null) {
+
+                            //===== smooth keypoint here
+                            val smoothUplift2D = MotionHelperUtils().smoothKpts(upLift2D, windowSize = 7)
+                            print(smoothUplift2D.shape())
                             val (resultMotion, updatedP4, updatedP9) = MotionPredictor().predictMotion(outputPoseGlobal3D, modelMotion,
                                                                                                         isLefty, isSideView)
                             print(updatedP4)

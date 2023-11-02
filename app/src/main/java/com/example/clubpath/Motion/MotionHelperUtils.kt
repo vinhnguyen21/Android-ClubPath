@@ -1,5 +1,6 @@
 package com.example.clubpath.Motion
 
+import androidx.compose.runtime.mutableStateOf
 import com.example.clubpath.utils.UpLift
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.factory.Nd4j
@@ -41,6 +42,61 @@ class MotionHelperUtils {
             output[NDArrayIndex.point(i.toLong()), NDArrayIndex.point(i.toLong())].assign(1.0)
         }
         return output
+    }
+
+    fun smoothKpts(kptArray: INDArray, windowSize: Int): INDArray {
+        val shapeArray = kptArray.shape()
+        val numJoint: Int = shapeArray[1].toInt()
+        val numCoordinate:Int = shapeArray[2].toInt()
+
+        val smoothKptOut = Nd4j.zeros(*shapeArray)
+
+        for (jointIdx in 0 until numJoint) {
+            for (axisIdx in 0 until numCoordinate) {
+                val tmpArrayJoint = kptArray[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(axisIdx.toLong())].toDoubleVector()
+                smoothKptOut[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(axisIdx.toLong())]
+                    .assign(arrConv(tmpArrayJoint, windowSize))
+            }
+        }
+        return smoothKptOut
+    }
+
+    private fun arrConv(rawArray: DoubleArray, windowSize: Int): INDArray {
+        val filter = DoubleArray(windowSize) {1.0 / windowSize}
+        val smoothResult = vDSP_convD(rawArray, filter)
+
+        // Create a padded input array with nearest input extension
+        val extensionSize: Int = windowSize / 2
+        val paddedOutput = DoubleArray(rawArray.count()) {0.0}
+
+        for (i in 0 until extensionSize) {
+            paddedOutput[i] = smoothResult.first()
+        }
+        // Copy the original input data
+        for (i in 0 until smoothResult.count())  {
+            paddedOutput[i + extensionSize] = smoothResult[i]
+        }
+        // Extend on the right side with nearest value
+        for (i in smoothResult.count() + extensionSize until rawArray.count()) {
+            paddedOutput[i] = smoothResult.last()
+        }
+
+        return Nd4j.create(paddedOutput)
+    }
+
+    fun vDSP_convD(signal: DoubleArray, filter: DoubleArray): DoubleArray {
+//        val signal = intArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+//        val filter = intArrayOf(10, 20, 30)
+        val outputCount = signal.size - filter.size + 1
+        val conv = mutableListOf<Double>()
+        for(i in 0 until outputCount){
+            var result = 0.0
+            for(x in filter.indices){
+                result += (signal[i + x] * filter[x])
+            }
+            conv.add(result)
+        }
+        return conv.toDoubleArray()
     }
 
 }
