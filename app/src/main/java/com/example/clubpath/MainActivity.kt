@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.clubpath.Motion.MotionModel
+import com.example.clubpath.Motion.MotionPredictor
 import com.example.clubpath.components3D.Lifting3DModel
 import com.example.clubpath.components3D.ModelKptsMLP
 import com.example.clubpath.components3D.ModelLeadAnkle
@@ -31,8 +32,10 @@ import org.nd4j.linalg.factory.Nd4j
 import java.lang.ArithmeticException
 
 class MainActivity : ComponentActivity() {
+    //====== Init 3D model
     private var liftingModel: Lifting3DModel? = null
-    // model adjust keypoint MLP
+
+    //====== model adjust keypoint MLP
     private var modelKptsMlpFrontRight: ModelKptsMLP? = null
     private var modelKptsMlpFrontLeft: ModelKptsMLP? = null
     private var modelKptsMlpSideRight: ModelKptsMLP? = null
@@ -40,7 +43,9 @@ class MainActivity : ComponentActivity() {
     private var modelKptsMLPChoose: ModelKptsMLP? = null
     private var modelLeadAnkle: ModelLeadAnkle? = null
 
-    private var motionModeltest: MotionModel? = null
+    //====== init motion model
+    private var modelSideMotion: MotionModel? = null
+    private var modelFrontMotion: MotionModel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,13 +81,10 @@ class MainActivity : ComponentActivity() {
                     modelKptsMlpSideLeft = initMLPModel(context, "ModelKptsMlpSideLeft.tflite")
                     modelLeadAnkle = initLeadAnkleModel(context, "ModelLeadAnkle.tflite")
 
-                    /*
-                    motionModeltest = MotionModel(context, "LstmTinySideMotion_float32.tflite")
-                    motionModeltest!!
-                        .initialize()
-                        .addOnFailureListener { e -> Log.e("LOADING 3D", "Error to setting up 3D Lifting.", e) }
-                        .await()
-                     */
+                    //============= Init Motion Models
+                    modelFrontMotion = initMotionModel(context, "LstmTinyFrontMotion.tflite")
+                    modelSideMotion = initMotionModel(context, "LstmTinySideMotion.tflite")
+
                     Log.d("Predict3D", "Running 3D Flow.")
                     // ============= Predict 3D and PList =============== //
                     val totalFrame: Int = kptArray.shape()[0].toInt()
@@ -101,16 +103,7 @@ class MainActivity : ComponentActivity() {
                         isSideView = utils3DHelper.isSideViewCheck(raw2dH36M, 10)
                         isLefty = utils3DHelper.isLeftyCheck(raw2dH36M, isSideView, 10)
 
-                        /*
-                        //======== test motion
-                        val keypointShapeTest = IntArray(2)
-                        keypointShapeTest[0] = 378
-                        keypointShapeTest[1] = 48
-                        var dataTest = Nd4j.zeros(keypointShapeTest, DataType.DOUBLE).add(0.01)
-                        val resultTest = motionModeltest?.classify(dataTest)
-                        print(resultTest)
-                        */
-
+                        //======================== Predict 3D ==========================//
                         // choose MLP model following side && handness
                         if (!isSideView && !isLefty) {
                             modelKptsMLPChoose = modelKptsMlpFrontRight
@@ -121,12 +114,38 @@ class MainActivity : ComponentActivity() {
                         } else {
                             modelKptsMLPChoose = modelKptsMlpSideLeft
                         }
-                        var (outputPoseGlobal3DMatft, upLift2DMatft) = utils3DHelper.predict3D(raw2dH36M, processed2DH36M,
+                        var (outputPoseGlobal3D, upLift2D) = utils3DHelper.predict3D(raw2dH36M, processed2DH36M,
                             liftingModel,
                             modelKptsMLPChoose,
                             modelLeadAnkle,
                             isSideView, isLefty,
                             frameWidth = frameWidth, frameHeight = frameHeight)
+
+                        //======================== Motion ==========================//
+                        val modelMotion = if (isSideView) {
+                            modelSideMotion
+                        } else {
+                            modelFrontMotion
+                        }
+
+                        if (outputPoseGlobal3D != null && upLift2D != null) {
+                            val (resultMotion, updatedP4, updatedP9) = MotionPredictor().predictMotion(outputPoseGlobal3D, modelMotion,
+                                                                                                        isLefty, isSideView)
+                            print(updatedP4)
+                            print(updatedP9)
+                            print(resultMotion!!.shape())
+                            print("Stand here")
+                        }
+
+                        /*
+                        //======== test motion
+                        val keypointShapeTest = IntArray(2)
+                        keypointShapeTest[0] = 378
+                        keypointShapeTest[1] = 48
+                        var dataTest = Nd4j.zeros(keypointShapeTest, DataType.DOUBLE).add(0.01)
+                        val resultTest = motionModeltest?.classify(dataTest)
+                        print(resultTest)
+                        */
                     }
                 }
                 Surface(
@@ -149,6 +168,15 @@ class MainActivity : ComponentActivity() {
         return model
     }
 
+    suspend fun initMotionModel(context: Context, modelPath: String): MotionModel {
+        val model = MotionModel(context, modelPath)
+        model
+            .initialize()
+            .addOnFailureListener { e -> Log.e("LOADING MLP", "Error to setting up 3D Lifting.", e) }
+            .await()
+        return model
+    }
+
     suspend fun initLeadAnkleModel(context: Context, modelPath: String): ModelLeadAnkle {
         val model = ModelLeadAnkle(context, modelPath)
         model
@@ -164,6 +192,9 @@ class MainActivity : ComponentActivity() {
         modelKptsMlpFrontRight?.close()
         modelKptsMlpSideLeft?.close()
         modelKptsMlpSideRight?.close()
+        modelLeadAnkle?.close()
+        modelFrontMotion?.close()
+        modelSideMotion?.close()
         super.onDestroy()
     }
 }
