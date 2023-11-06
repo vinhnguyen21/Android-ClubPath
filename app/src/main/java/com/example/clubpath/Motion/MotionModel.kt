@@ -1,119 +1,33 @@
 package com.example.clubpath.Motion
 
 import android.content.Context
-import android.content.res.AssetManager
 import android.util.Log
-import com.google.android.gms.tasks.Task
-import com.google.android.gms.tasks.TaskCompletionSource
 import org.nd4j.linalg.api.buffer.DataBuffer
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.factory.Nd4j
 import org.nd4j.linalg.indexing.NDArrayIndex
 import org.tensorflow.lite.DataType
-import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.InterpreterApi
+import org.tensorflow.lite.support.common.FileUtil
 import org.tensorflow.lite.support.tensorbuffer.TensorBuffer
-import java.io.FileInputStream
-import java.io.IOException
+import java.io.Closeable
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.channels.FileChannel
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
-class MotionModel(private val context: Context, private val modelPath: String) {
-    private var interpreter: Interpreter? = null
-
-    /*
-    private val keypoint3dBuffer: TensorBuffer by lazy {
-        val probabilityTensorIndex = 0
-        val arrayShape =
-            interpreter?.getOutputTensor(probabilityTensorIndex)?.shape() // {1, 16, 3}
-        val probabilityDataType = interpreter?.getOutputTensor(probabilityTensorIndex)?.dataType()
-        TensorBuffer.createFixedSize(arrayShape, probabilityDataType)
+class MotionModel(private val context: Context, private val modelPath: String): Closeable {
+    private val numThread: Int = 4
+    private val interpreterInitializer = lazy {
+        val interpreterOption = InterpreterApi.Options()
+            .setRuntime(InterpreterApi.Options.TfLiteRuntime.FROM_SYSTEM_ONLY)
+            .setNumThreads(numThread)
+        InterpreterApi.create(FileUtil.loadMappedFile(context, modelPath), interpreterOption)
     }
-    */
-    var isInitialized = false
+    private val interpreter: InterpreterApi by interpreterInitializer
 
-    /** Executor to run inference task in the background. */
-    private val executorService: ExecutorService = Executors.newCachedThreadPool()
-
-    fun initialize(): Task<Void?> {
-        val task = TaskCompletionSource<Void?>()
-        executorService.execute {
-            try {
-                initializeInterpreter()
-                task.setResult(null)
-            } catch (e: IOException) {
-                task.setException(e)
-            }
+    /** Releases TFLite resources if initialized. */
+    override fun close() {
+        if (interpreterInitializer.isInitialized()) {
+            interpreter.close()
         }
-        return task.task
-    }
-
-    @Throws(IOException::class)
-    private fun initializeInterpreter() {
-        // Load the TF Lite model from asset folder and initialize TF Lite Interpreter with NNAPI enabled.
-        val assetManager = context.assets
-        val model = loadModelFile(assetManager, modelPath)
-
-        val interpreter = Interpreter(model)
-        // TODO: Read the model input shape from model file.
-
-        // Finish interpreter initialization.
-        this.interpreter = interpreter
-
-        isInitialized = true
-
-        Log.d(TAG, "Initialized TFLite interpreter.")
-    }
-
-    @Throws(IOException::class)
-    private fun loadModelFile(assetManager: AssetManager, filename: String): ByteBuffer {
-        val fileDescriptor = assetManager.openFd(filename)
-        val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-        val fileChannel = inputStream.channel
-        val startOffset = fileDescriptor.startOffset
-        val declaredLength = fileDescriptor.declaredLength
-        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
-    }
-
-    fun close() {
-        executorService.execute {
-            interpreter?.close()
-            Log.d(TAG, "Closed TFLite interpreter.")
-        }
-    }
-
-    /**
-     * Initialize the input objects and fill them with zeros.
-     */
-    private fun initializeDataInput(): HashMap<String, Any> {
-        val inputs = HashMap<String, Any>()
-        for (inputName in interpreter!!.getSignatureInputs(SIGNATURE_KEY)) {
-            // Initialize a ByteBuffer filled with zeros as an initial input of the TFLite model.
-            val tensor = interpreter!!.getInputTensorFromSignature(inputName, SIGNATURE_KEY)
-
-            val byteBuffer = ByteBuffer.allocateDirect(tensor.numBytes())
-            byteBuffer.order(ByteOrder.nativeOrder())
-            inputs[inputName] = byteBuffer
-        }
-        return inputs
-    }
-
-    /**
-     * Initialize the output objects to store the TFLite model outputs.
-     */
-    private fun initializeOutput(): HashMap<String, Any> {
-        val outputs = HashMap<String, Any>()
-        for (outputName in interpreter!!.getSignatureOutputs(SIGNATURE_KEY)) {
-            // Initialize a ByteBuffer to store the output of the TFLite model.
-            val tensor = interpreter!!.getOutputTensorFromSignature(outputName, SIGNATURE_KEY)
-            val byteBuffer = ByteBuffer.allocateDirect(tensor.numBytes())
-            byteBuffer.order(ByteOrder.nativeOrder())
-            outputs[outputName] = byteBuffer
-        }
-
-        return outputs
     }
 
     private fun processMotionInput(keypoint: INDArray): ByteBuffer {
@@ -179,8 +93,5 @@ class MotionModel(private val context: Context, private val modelPath: String) {
 
     companion object {
         private val TAG = MotionModel::class.java.simpleName
-        private const val INPUT_NAME = "input"
-        private const val OUTPUT_NAME = "output"
-        private const val SIGNATURE_KEY = "serving_default"
     }
 }

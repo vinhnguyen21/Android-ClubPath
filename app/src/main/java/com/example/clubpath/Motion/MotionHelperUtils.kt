@@ -1,6 +1,5 @@
 package com.example.clubpath.Motion
 
-import androidx.compose.runtime.mutableStateOf
 import com.example.clubpath.utils.UpLift
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.factory.Nd4j
@@ -44,7 +43,7 @@ class MotionHelperUtils {
         return output
     }
 
-    fun smoothKpts(kptArray: INDArray, windowSize: Int): INDArray {
+    fun smoothKpts(kptArray: INDArray, windowSize: Int): INDArray? {
         val shapeArray = kptArray.shape()
         val numJoint: Int = shapeArray[1].toInt()
         val numCoordinate:Int = shapeArray[2].toInt()

@@ -1,87 +1,39 @@
 package com.example.clubpath.components3D
 
 import android.content.Context
-import android.content.res.AssetManager
-import android.util.Log
-import com.google.android.gms.tasks.Task
-import com.google.android.gms.tasks.TaskCompletionSource
 import org.nd4j.linalg.api.buffer.DataBuffer
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.factory.Nd4j
 import org.tensorflow.lite.DataType
-import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.InterpreterApi
+import org.tensorflow.lite.support.common.FileUtil
 import org.tensorflow.lite.support.tensorbuffer.TensorBuffer
-import java.io.FileInputStream
-import java.io.IOException
+import java.io.Closeable
 import java.nio.ByteBuffer
-import java.nio.channels.FileChannel
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
-class ModelKptsMLP(private val context: Context, private val modelPath: String) {
-    private var interpreter: Interpreter? = null
-    private val numberThreads: Int = 4
+
+class ModelKptsMLP(private val context: Context, private val modelPath: String): Closeable {
+    private val numThread: Int = 4
+    private val interpreterInitializer = lazy {
+        val interpreterOption = InterpreterApi.Options()
+            .setRuntime(InterpreterApi.Options.TfLiteRuntime.FROM_SYSTEM_ONLY)
+            .setNumThreads(numThread)
+        InterpreterApi.create(FileUtil.loadMappedFile(context, modelPath), interpreterOption)
+    }
+    private val interpreter: InterpreterApi by interpreterInitializer
+
     private val keypointBuffer: TensorBuffer by lazy {
         val probabilityTensorIndex = 0
         val arrayShape =
-            interpreter?.getOutputTensor(probabilityTensorIndex)?.shape() // {1, 16, 3}
+            interpreter?.getOutputTensor(probabilityTensorIndex)?.shape() // {1, 48}
         val probabilityDataType = interpreter?.getOutputTensor(probabilityTensorIndex)?.dataType()
         TensorBuffer.createFixedSize(arrayShape, probabilityDataType)
     }
 
-    var isInitialized = false
-
-    /** Executor to run inference task in the background. */
-    private val executorService: ExecutorService = Executors.newCachedThreadPool()
-
-    fun initialize(): Task<Void?> {
-        val task = TaskCompletionSource<Void?>()
-        executorService.execute {
-            try {
-                initializeInterpreter()
-                task.setResult(null)
-            } catch (e: IOException) {
-                task.setException(e)
-            }
-        }
-        return task.task
-    }
-
-    @Throws(IOException::class)
-    private fun initializeInterpreter() {
-        // Load the TF Lite model from asset folder and initialize TF Lite Interpreter with NNAPI enabled.
-        val assetManager = context.assets
-        val model = loadModelFile(assetManager, modelPath)
-        val option = Interpreter.Options()
-        option.numThreads = numberThreads
-        val interpreter = Interpreter(model, option)
-
-        // TODO: Read the model input shape from model file.
-
-        // Read input shape from model file.
-//        val inputShape = interpreter.getInputTensor(0).shape()
-
-        // Finish interpreter initialization.
-        this.interpreter = interpreter
-
-        isInitialized = true
-        Log.d(TAG, "Initialized TFLite interpreter.")
-    }
-
-    @Throws(IOException::class)
-    private fun loadModelFile(assetManager: AssetManager, filename: String): ByteBuffer {
-        val fileDescriptor = assetManager.openFd(filename)
-        val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-        val fileChannel = inputStream.channel
-        val startOffset = fileDescriptor.startOffset
-        val declaredLength = fileDescriptor.declaredLength
-        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
-    }
-
-    fun close() {
-        executorService.execute {
-            interpreter?.close()
-            Log.d(TAG, "Closed TFLite interpreter.")
+    /** Releases TFLite resources if initialized. */
+    override fun close() {
+        if (interpreterInitializer.isInitialized()) {
+            interpreter.close()
         }
     }
 

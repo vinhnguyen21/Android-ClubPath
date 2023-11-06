@@ -1,6 +1,5 @@
 package com.example.clubpath
 
-import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -24,8 +23,9 @@ import com.example.clubpath.ui.theme.ClubPathTheme
 import com.example.clubpath.utils.SwingKeypointModel
 import com.example.clubpath.components3D.Utils3DHelper
 import com.example.clubpath.utils.readJSONFromAssets
-//import com.google.android.gms.tflite.client.TfLiteInitializationOptions
-//import com.google.android.gms.tflite.java.TfLite
+import com.google.android.gms.tasks.Tasks
+import com.google.android.gms.tflite.client.TfLiteInitializationOptions
+import com.google.android.gms.tflite.java.TfLite
 import kotlinx.coroutines.tasks.await
 import org.nd4j.linalg.api.buffer.DataType
 import org.nd4j.linalg.api.ndarray.INDArray
@@ -33,7 +33,9 @@ import org.nd4j.linalg.factory.Nd4j
 import java.lang.ArithmeticException
 
 class MainActivity : ComponentActivity() {
+
     //====== Init 3D model
+//    private var liftingModel: Lifting3DModel? = null
     private var liftingModel: Lifting3DModel? = null
 
     //====== model adjust keypoint MLP
@@ -50,7 +52,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val keypointData = readJSONFromAssets(this, "debugPose.json")
+        val keypointData = readJSONFromAssets(this, "debugPoseSideLeft.json")
 
         // === convert json file to keypoint array
         val kptArray: INDArray = convertLstPoseToArray(keypointData) ?: return
@@ -65,26 +67,28 @@ class MainActivity : ComponentActivity() {
                 // A surface container using the 'background' color from the theme
                 val context = LocalContext.current
                 val useGPU = false
-//                val tfliteOption = TfLiteInitializationOptions.builder()
-//                if (useGPU) {
-//                    tfliteOption.setEnableGpuDelegateSupport(true)
-//                }
-                LaunchedEffect(key1 = Unit) {
-                    liftingModel = Lifting3DModel(context)
-                    liftingModel!!
-                        .initialize()
-                        .addOnFailureListener { e -> Log.e("LOADING 3D", "Error to setting up 3D Lifting.", e) }
-                        .await()
-                    //============= Init mlp keypoint models
-                    modelKptsMlpFrontRight = initMLPModel(context, "ModelKptsMlpFrontRight.tflite")
-                    modelKptsMlpFrontLeft = initMLPModel(context, "ModelKptsMlpFrontLeft.tflite")
-                    modelKptsMlpSideRight = initMLPModel(context, "ModelKptsMlpSideRight.tflite")
-                    modelKptsMlpSideLeft = initMLPModel(context, "ModelKptsMlpSideLeft.tflite")
-                    modelLeadAnkle = initLeadAnkleModel(context, "ModelLeadAnkle.tflite")
 
-                    //============= Init Motion Models
-                    modelFrontMotion = initMotionModel(context, "LstmTinyFrontMotion.tflite")
-                    modelSideMotion = initMotionModel(context, "LstmTinySideMotion.tflite")
+                LaunchedEffect(key1 = Unit) {
+                    TfLite.initialize(context, TfLiteInitializationOptions.builder().build())
+                        .continueWithTask { task ->
+                            if (task.isSuccessful) {
+                                liftingModel = Lifting3DModel(context)
+                                //============= Init mlp keypoint models
+                                modelKptsMlpFrontRight = ModelKptsMLP(context, "ModelKptsMlpFrontRight.tflite")
+                                modelKptsMlpFrontLeft = ModelKptsMLP(context, "ModelKptsMlpFrontLeft.tflite")
+                                modelKptsMlpSideRight = ModelKptsMLP(context, "ModelKptsMlpSideRight.tflite")
+                                modelKptsMlpSideLeft = ModelKptsMLP(context, "ModelKptsMlpSideLeft.tflite")
+                                modelLeadAnkle = ModelLeadAnkle(context, "ModelLeadAnkle.tflite")
+                                //============= Init Motion Models
+                                modelFrontMotion = MotionModel(context, "LstmTinyFrontMotion.tflite")
+                                modelSideMotion = MotionModel(context, "LstmTinySideMotion.tflite")
+                                return@continueWithTask Tasks.forResult(null)
+                            } else {
+                                // Fallback to initialize interpreter without GPU
+                                return@continueWithTask TfLite.initialize(context)
+                            }
+                        }
+                        .await()
 
                     Log.d("Predict3D", "Running 3D Flow.")
                     // ============= Predict 3D and PList =============== //
@@ -100,7 +104,7 @@ class MainActivity : ComponentActivity() {
 
                     //=== Todo
                     //= Using tensorflow library not google service
-                    if (raw2dH36M != null && processed2DH36M != null && liftingModel!!.isInitialized) {
+                    if (raw2dH36M != null && processed2DH36M != null && liftingModel != null) {
                         isSideView = utils3DHelper.isSideViewCheck(raw2dH36M, 10)
                         isLefty = utils3DHelper.isLeftyCheck(raw2dH36M, isSideView, 10)
 
@@ -133,12 +137,12 @@ class MainActivity : ComponentActivity() {
 
                             //===== smooth keypoint here
                             val smoothUplift2D = MotionHelperUtils().smoothKpts(upLift2D, windowSize = 7)
-                            print(smoothUplift2D.shape())
                             val (resultMotion, updatedP4, updatedP9) = MotionPredictor().predictMotion(outputPoseGlobal3D, modelMotion,
                                                                                                         isLefty, isSideView)
                             print(updatedP4)
                             print(updatedP9)
                             print(resultMotion!!.shape())
+                            print(smoothUplift2D!!.shape())
                             print("Stand here")
                         }
 
@@ -162,33 +166,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-    suspend fun initMLPModel(context: Context, modelPath: String): ModelKptsMLP {
-        val model = ModelKptsMLP(context, modelPath)
-        model
-            .initialize()
-            .addOnFailureListener { e -> Log.e("LOADING MLP", "Error to setting up 3D Lifting.", e) }
-            .await()
-        return model
-    }
-
-    suspend fun initMotionModel(context: Context, modelPath: String): MotionModel {
-        val model = MotionModel(context, modelPath)
-        model
-            .initialize()
-            .addOnFailureListener { e -> Log.e("LOADING MLP", "Error to setting up 3D Lifting.", e) }
-            .await()
-        return model
-    }
-
-    suspend fun initLeadAnkleModel(context: Context, modelPath: String): ModelLeadAnkle {
-        val model = ModelLeadAnkle(context, modelPath)
-        model
-            .initialize()
-            .addOnFailureListener { e -> Log.e("LOADING Ankle", "Error to setting up 3D Lifting.", e) }
-            .await()
-        return model
     }
 
     override fun onDestroy() {
