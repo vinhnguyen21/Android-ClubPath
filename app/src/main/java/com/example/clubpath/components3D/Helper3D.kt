@@ -261,7 +261,7 @@ class Utils3DHelper(private val totalFrame: Int) {
         } //get axis 2 -> Matft need 2 dimension array with stride
 
         // Output global 3D
-        val leadAnkle2DZSignal = leadAnklePred.mul(scale)
+        val leadAnkle2DZSignal = leadAnklePred[NDArrayIndex.all(), NDArrayIndex.point(0)].mul(scale)
         val leadAnkle2DXSignal = leadAnkle2DZSignal.dup()
         // Output global 3D
         val intArrayShape3D = IntArray(3)
@@ -276,7 +276,7 @@ class Utils3DHelper(private val totalFrame: Int) {
             if (isSideView) {
                 tmpX = kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(2)]
                             .sub(leadAnkleX3DZoom[NDArrayIndex.all(), NDArrayIndex.point(2)])
-                            .add(leadAnkle2DXSignal[NDArrayIndex.all(), NDArrayIndex.point(0)])
+                            .add(leadAnkle2DXSignal)
                 tmpLead2D = kpts3DZYZoom[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.all()]
                                 .sub(leadAnkleZY3DZoom)
                                 .add(leadAnkle2D)
@@ -289,7 +289,7 @@ class Utils3DHelper(private val totalFrame: Int) {
             } else {
                 tmpX = kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(0)]
                     .sub(leadAnkleZ3DZoom[NDArrayIndex.all(), NDArrayIndex.point(0)])
-                    .add(leadAnkle2DZSignal[NDArrayIndex.all(), NDArrayIndex.point(0)])
+                    .add(leadAnkle2DZSignal)
                 kpts3DGlobal[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(0)]
                     .assign(tmpX)
 
