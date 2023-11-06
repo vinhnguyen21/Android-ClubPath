@@ -41,9 +41,11 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion '1.3.2'
     }
+
     packagingOptions {
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
+            pickFirst '**/*.json'
         }
     }
 }
@@ -68,7 +70,7 @@ dependencies {
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
 
     // AI Packages
-    implementation "org.nd4j:nd4j-native-platform:1.0.0-beta6"
+    implementation "org.nd4j:nd4j-native-platform:1.0.0-M2.1"
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.0")
 
     //===== Tensorflow Lite in Play Services dependencies
