@@ -280,10 +280,11 @@ class Utils3DHelper(private val totalFrame: Int) {
                 tmpLead2D = kpts3DZYZoom[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.all()]
                                 .sub(leadAnkleZY3DZoom)
                                 .add(leadAnkle2D)
-                tmpLead2D[NDArrayIndex.all(), NDArrayIndex.point(2)]
+
+                kpts3DGlobal[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(2)]
                     .assign(tmpX)
 
-                kpts3DGlobal[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.all()]
+                kpts3DGlobal[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.interval(0,2)]
                     .assign(tmpLead2D)
             } else {
                 tmpX = kpts3DZoom[NDArrayIndex.all(), NDArrayIndex.point(jointIdx.toLong()), NDArrayIndex.point(0)]
