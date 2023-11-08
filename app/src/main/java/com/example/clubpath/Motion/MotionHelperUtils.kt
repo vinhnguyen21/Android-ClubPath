@@ -98,4 +98,16 @@ class MotionHelperUtils {
         return conv.toDoubleArray()
     }
 
+    fun linspace(start: Double, end: Double, count: Int): ArrayList<Long> {
+        require(count > 1) { "Count must be greater than 1" }
+        val result: ArrayList<Long> = ArrayList()
+        val step = (end - start) / (count - 1)
+
+        for (i in 0 until count) {
+            val value = start + i * step
+            result.add(value.toLong())
+        }
+
+        return result
+    }
 }

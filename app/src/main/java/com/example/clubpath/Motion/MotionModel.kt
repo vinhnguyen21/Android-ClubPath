@@ -46,19 +46,6 @@ class MotionModel(private val context: Context, private val modelPath: String): 
         return inputFeature0.buffer
     }
 
-    private fun linspace(start: Double, end: Double, count: Int): ArrayList<Long> {
-        require(count > 1) { "Count must be greater than 1" }
-        val result: ArrayList<Long> = ArrayList()
-        val step = (end - start) / (count - 1)
-
-        for (i in 0 until count) {
-            val value = start + i * step
-            result.add(value.toLong())
-        }
-
-        return result
-    }
-
      fun classify(inPutArray: INDArray): INDArray {
         val totalFrame = inPutArray.shape()[0].toDouble()
 
@@ -68,7 +55,7 @@ class MotionModel(private val context: Context, private val modelPath: String): 
 
         //==== Todo
         /// Do linspace here to forward the result from n frames -> 360 frames -> n frames
-        val idxMappingInput = linspace(0.0, totalFrame - 1.0, 360)
+        val idxMappingInput = MotionHelperUtils().linspace(0.0, totalFrame - 1.0, 360)
         val mappingIndice = NDArrayIndex.indices(*idxMappingInput.toLongArray())
         val inputMotion = inPutArray.get(mappingIndice, NDArrayIndex.all())
 
@@ -83,7 +70,7 @@ class MotionModel(private val context: Context, private val modelPath: String): 
         var tmpOutput = Nd4j.create(outputs.floatArray)
         tmpOutput = tmpOutput.reshape(outputShape[0].toLong(), outputShape[1].toLong())
 
-        val idxMappingBackInput = linspace(0.0, 360.0 - 1.0, totalFrame.toInt())
+        val idxMappingBackInput = MotionHelperUtils().linspace(0.0, 360.0 - 1.0, totalFrame.toInt())
         val test = tmpOutput.get(
             NDArrayIndex.indices(*idxMappingBackInput.toLongArray()),
             NDArrayIndex.all()
