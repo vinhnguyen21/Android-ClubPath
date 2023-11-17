@@ -1,7 +1,6 @@
 package com.example.clubpath.autotrimswing
 
 import android.content.Context
-import com.example.clubpath.components3D.Lifting3DModel
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.InterpreterApi
 import org.tensorflow.lite.support.common.FileUtil

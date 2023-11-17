@@ -16,6 +16,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.example.clubpath.Motion.MotionHelperUtils
 import com.example.clubpath.Motion.MotionModel
 import com.example.clubpath.Motion.MotionPredictor
+import com.example.clubpath.autotrimswing.SwingClassifier
 import com.example.clubpath.components3D.Lifting3DModel
 import com.example.clubpath.components3D.ModelKptsMLP
 import com.example.clubpath.components3D.ModelLeadAnkle
@@ -30,12 +31,12 @@ import kotlinx.coroutines.tasks.await
 import org.nd4j.linalg.api.buffer.DataType
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.factory.Nd4j
+import org.nd4j.linalg.indexing.NDArrayIndex
 import java.lang.ArithmeticException
 
 class MainActivity : ComponentActivity() {
 
     //====== Init 3D model
-//    private var liftingModel: Lifting3DModel? = null
     private var liftingModel: Lifting3DModel? = null
 
     //====== model adjust keypoint MLP
@@ -50,12 +51,15 @@ class MainActivity : ComponentActivity() {
     private var modelSideMotion: MotionModel? = null
     private var modelFrontMotion: MotionModel? = null
 
+    //====== init swing classifier model
+    private var modelSwingClassifier: SwingClassifier? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val keypointData = readJSONFromAssets(this, "debugPoseSideLeft.json")
+        val keypointData = readJSONFromAssets(this, "debugPoseSideRight.json")
 
         // === convert json file to keypoint array
-        val kptArray: INDArray = convertLstPoseToArray(keypointData) ?: return
+        val (kptArray, swingKeypoint) = convertLstPoseToArray(keypointData) ?: return
 
         // === Input Parameter
         val totalFrame: Int = keypointData.count()
@@ -72,6 +76,7 @@ class MainActivity : ComponentActivity() {
                     TfLite.initialize(context, TfLiteInitializationOptions.builder().build())
                         .continueWithTask { task ->
                             if (task.isSuccessful) {
+
                                 liftingModel = Lifting3DModel(context)
                                 //============= Init mlp keypoint models
                                 modelKptsMlpFrontRight = ModelKptsMLP(context, "ModelKptsMlpFrontRight.tflite")
@@ -82,6 +87,8 @@ class MainActivity : ComponentActivity() {
                                 //============= Init Motion Models
                                 modelFrontMotion = MotionModel(context, "LstmTinyFrontMotion.tflite")
                                 modelSideMotion = MotionModel(context, "LstmTinySideMotion.tflite")
+                                modelSwingClassifier = SwingClassifier(context)
+
                                 return@continueWithTask Tasks.forResult(null)
                             } else {
                                 // Fallback to initialize interpreter without GPU
@@ -89,9 +96,26 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         .await()
+                    /*
+                    //============= Check Swing Classifier Model ===============//
+                    val numFrameInput = 90
+                    Log.d("Swing Classifier", "Running Classifier Flow.")
+                    val idxMappingInput = MotionHelperUtils().linspace(0.0, totalFrame - 1.0, numFrameInput)
+                    val mappingIndice = NDArrayIndex.indices(*idxMappingInput.toLongArray())
+                    val keypointClassifier = swingKeypoint.get(mappingIndice, NDArrayIndex.all(), NDArrayIndex.all())
 
-                    Log.d("Predict3D", "Running 3D Flow.")
+                    var inputClassifier = Array<Array<Float>>(90) { arrayOf(0.0f) }
+
+                    for (frameIdx in 0 until numFrameInput) {
+                        val tmpData = keypointClassifier.get(NDArrayIndex.point(frameIdx.toLong())).reshape(-1).toFloatVector()
+                        inputClassifier[frameIdx] = tmpData.toTypedArray()
+                    }
+
+                    val outputClassifier = modelSwingClassifier?.classify(inputClassifier, frameWidth.toFloat(), frameHeight.toFloat())
+                    print(outputClassifier)
+                    */
                     // ============= Predict 3D and PList =============== //
+                    Log.d("Predict3D", "Running 3D Flow.")
                     val totalFrame: Int = kptArray.shape()[0].toInt()
                     val utils3DHelper = Utils3DHelper(totalFrame)
                     val (raw2dH36M, processed2DH36M) = utils3DHelper.convertCoCoToHuman36M(
@@ -105,6 +129,9 @@ class MainActivity : ComponentActivity() {
                     //=== Todo
                     //= Using tensorflow library not google service
                     if (raw2dH36M != null && processed2DH36M != null && liftingModel != null) {
+                        // ====================== Test Swing Classification
+
+
                         isSideView = utils3DHelper.isSideViewCheck(raw2dH36M, 10)
                         isLefty = utils3DHelper.isLeftyCheck(raw2dH36M, isSideView, 10)
 
@@ -181,13 +208,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private fun convertLstPoseToArray(array: List<SwingKeypointModel>): INDArray? {
+private fun convertLstPoseToArray(array: List<SwingKeypointModel>): Pair<INDArray, INDArray>? {
     try {
         val totalFrame: Int = array.count()
         val keypointShape = IntArray(3)
         keypointShape[0] = totalFrame
         keypointShape[1] = 17
         keypointShape[2] = 2
+
+        var swingKeypoint = Nd4j.zeros(totalFrame, 17, 3)
         var kptArray = Nd4j.zeros(keypointShape, DataType.DOUBLE)
         array.forEachIndexed { frameIdx, frameEle ->
             val ftPose = frameEle.listPose.first()
@@ -200,9 +229,23 @@ private fun convertLstPoseToArray(array: List<SwingKeypointModel>): INDArray? {
                     intArrayOf(frameIdx, iPose, 1),
                     poseEle.location.y.toDouble() ?: 0.0
                 )
+
+                //
+                swingKeypoint.putScalar(
+                    intArrayOf(frameIdx, iPose, 0),
+                    poseEle.location.x
+                )
+                swingKeypoint.putScalar(
+                    intArrayOf(frameIdx, iPose, 1),
+                    poseEle.location.y
+                )
+                swingKeypoint.putScalar(
+                    intArrayOf(frameIdx, iPose, 2),
+                    poseEle.location.prob
+                )
             }
         }
-        return kptArray
+        return Pair(kptArray, swingKeypoint)
     } catch (e: ArithmeticException) {
         Log.e("convert LSTPose Json", "cannot parse JsonKeypoint to array")
     }
